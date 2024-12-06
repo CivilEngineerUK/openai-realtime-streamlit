@@ -5,3 +5,4 @@ tzlocal>=5.2
 websockets>=14.1
 PyAudio>=0.2.13
 python-dateutil>=2.9.0
+streamlit-audiorec
