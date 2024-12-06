@@ -1,16 +1,13 @@
 import asyncio
-import base64
 import json
 import threading
 from asyncio import run_coroutine_threadsafe
 
 import streamlit as st
+
 from constants import (AUTOSCROLL_SCRIPT, DOCS, HIDE_STREAMLIT_RUNNING_MAN_SCRIPT, OAI_LOGO_URL)
 from utils import SimpleRealtime
 from tools import get_current_time
-
-# st_audiorec for audio input
-from st_audiorec import st_audiorec
 
 st.set_page_config(layout="wide")
 
@@ -19,7 +16,6 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
     st.session_state["show_splash_screen"] = True
 
-# If not authenticated, show splash and stop
 if not st.session_state["authenticated"]:
     from splash_screen import SplashScreen
 
@@ -48,7 +44,7 @@ def setup_client():
     if "client" in st.session_state:
         return st.session_state.client
     client = SimpleRealtime(event_loop=st.session_state.event_loop, debug=True)
-    # Add the time function tool
+    # Add a sample tool if desired
     client.add_tool(get_current_time)
     return client
 
@@ -61,19 +57,19 @@ def handle_connection():
     if st.session_state.client.is_connected():
         try:
             run_async(st.session_state.client.disconnect())
-            st.success("Disconnected from OpenAI Realtime API")
+            st.success("Disconnected from Realtime API")
         except Exception as e:
             st.error(f"Error disconnecting: {str(e)}")
     else:
         try:
             run_async(st.session_state.client.connect())
             if st.session_state.client.is_connected():
-                st.success("Connected to OpenAI Realtime API")
+                st.success("Connected to Realtime API")
             else:
-                st.error("Failed to connect to OpenAI Realtime API")
+                st.error("Failed to connect to Realtime API")
         except Exception as e:
-            st.error(f"Error connecting to OpenAI Realtime API: {str(e)}")
-    st.experimental_rerun()
+            st.error(f"Error connecting: {str(e)}")
+    st.rerun()
 
 
 def st_app():
@@ -92,24 +88,23 @@ def st_app():
         st.session_state.show_full_events = st.checkbox("Show Full Event Payloads", value=False)
 
         st.markdown("### Logs")
-        logs_container = st.empty()
-        with logs_container:
-            logs = st.session_state.client.logs
-            if st.session_state.show_full_events:
-                for _, _, log in logs:
-                    st.json(log, expanded=False)
-            else:
-                for time, event_type, log in logs:
-                    if event_type == "server":
-                        st.write(f"{time}\t:green[↓ server] {json.loads(log)['type']}")
-                    else:
-                        st.write(f"{time}\t:blue[↑ client] {json.loads(log)['type']}")
-            st.components.v1.html(AUTOSCROLL_SCRIPT, height=0)
+        logs = st.session_state.client.logs
+        if st.session_state.show_full_events:
+            for _, _, log in logs:
+                st.json(log, expanded=False)
+        else:
+            for time, event_type, log in logs:
+                parsed = json.loads(log)
+                if event_type == "server":
+                    st.write(f"{time}\t:green[↓ server] {parsed.get('type', '')}")
+                else:
+                    st.write(f"{time}\t:blue[↑ client] {parsed.get('type', '')}")
+        st.components.v1.html(AUTOSCROLL_SCRIPT, height=0)
 
         st.markdown("### Conversation")
         st.write(st.session_state.client.transcript)
 
-        st.markdown("### Send a Message")
+        st.markdown("### Send a Message (JSON format)")
         input_text = st.text_area("Enter your message:", height=100)
         if st.button("Send", type="primary", disabled=not st.session_state.client.is_connected()):
             if input_text.strip():
@@ -125,19 +120,6 @@ def st_app():
                     st.error(f"Error sending message: {str(e)}")
             else:
                 st.warning("Please enter a message before sending.")
-
-        st.markdown("### Record and Send Audio")
-        # Record audio using st_audiorec
-        audio_data = st_audiorec()
-        if audio_data is not None:
-            # audio_data is a numpy array representing the recorded audio data
-            # Convert it to WAV in memory if needed or send as is, depending on your client logic
-            st.audio(audio_data, format="audio/wav")
-            # If your client expects a certain format, you can send it here
-            # Example: st.session_state.client.send("input_audio_buffer.append", {"audio": YOUR_ENCODED_AUDIO})
-            # After finishing sending audio:
-            # st.session_state.client.send("input_audio_buffer.commit")
-            # st.session_state.client.send("response.create")
 
     with docs_tab:
         st.markdown(DOCS)
