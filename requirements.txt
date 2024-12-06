@@ -1,6 +1,8 @@
-requests
-numpy
-sounddevice
-streamlit
-tzlocal
-websockets
+requests>=2.32.3
+numpy>=2.0.2
+sounddevice>=0.5.1
+streamlit>=1.40.2
+tzlocal>=5.2
+websockets>=14.1
+PyAudio>=0.2.13
+python-dateutil>=2.9.0
