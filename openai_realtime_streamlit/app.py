@@ -12,6 +12,7 @@ from constants import (AUTOSCROLL_SCRIPT, DOCS,
                        HIDE_STREAMLIT_RUNNING_MAN_SCRIPT, OAI_LOGO_URL)
 from utils import SimpleRealtime
 from audio import StreamingAudioRecorder
+from audio_browser import BrowserAudioRecorder
 
 # function calling
 from tools import get_current_time
@@ -102,7 +103,7 @@ def setup_client():
 st.session_state.client = setup_client()
 
 if "recorder" not in st.session_state:
-    st.session_state.recorder = StreamingAudioRecorder()
+    st.session_state.recorder = BrowserAudioRecorder()
 if "recording" not in st.session_state:
     st.session_state.recording = False
 
