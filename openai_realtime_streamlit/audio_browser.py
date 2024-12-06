@@ -1,36 +1,33 @@
-import queue
+import base64
+import streamlit as st
 from streamlit.components.v1 import html
 
 
 class BrowserAudioRecorder:
-    def __init__(self, sample_rate=24_000, channels=1):
-        self.sample_rate = sample_rate
-        self.channels = channels
-        self.audio_queue = queue.Queue()
+    def __init__(self, audio_callback=None):
         self.is_recording = False
+        self.audio_callback = audio_callback
 
     def start_recording(self):
         self.is_recording = True
         # Inject JavaScript for browser audio recording
         html("""
             <script>
+                let mediaRecorder;
+                let audioChunks = [];
+
                 const startRecording = async () => {
                     try {
                         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        const mediaRecorder = new MediaRecorder(stream);
-                        const audioChunks = [];
+                        mediaRecorder = new MediaRecorder(stream);
 
                         mediaRecorder.ondataavailable = (event) => {
                             audioChunks.push(event.data);
-                        };
-
-                        mediaRecorder.onstop = () => {
-                            const audioBlob = new Blob(audioChunks);
+                            // Convert the latest chunk to base64 and send it
                             const reader = new FileReader();
-                            reader.readAsDataURL(audioBlob);
+                            reader.readAsDataURL(new Blob([event.data]));
                             reader.onloadend = () => {
-                                const base64data = reader.result;
-                                // Send to Streamlit
+                                const base64data = reader.result.split(',')[1];
                                 window.parent.postMessage({
                                     type: "streamlit:audioData",
                                     data: base64data
@@ -39,6 +36,7 @@ class BrowserAudioRecorder:
                         };
 
                         mediaRecorder.start(100); // Collect data every 100ms
+                        window.mediaRecorder = mediaRecorder;
                     } catch (err) {
                         console.error("Error accessing microphone:", err);
                     }
@@ -46,22 +44,16 @@ class BrowserAudioRecorder:
 
                 startRecording();
             </script>
-        """)
+        """, height=0)
 
     def stop_recording(self):
         if self.is_recording:
             self.is_recording = False
-            # Inject JavaScript to stop recording
             html("""
                 <script>
-                    if (window.mediaRecorder) {
+                    if (window.mediaRecorder && window.mediaRecorder.state === 'recording') {
                         window.mediaRecorder.stop();
+                        window.mediaRecorder.stream.getTracks().forEach(track => track.stop());
                     }
                 </script>
-            """)
-
-    def get_audio_chunk(self):
-        try:
-            return self.audio_queue.get_nowait()
-        except queue.Empty:
-            return None
+            """, height=0)
