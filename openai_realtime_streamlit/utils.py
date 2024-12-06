@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import json
-import numpy as np
 import os
 import tzlocal
 from datetime import datetime
@@ -48,7 +47,6 @@ class SimpleRealtime:
             param_type = type_map.get(param.annotation, "string")
             param_info = {"type": param_type}
 
-            # Add description from type hints if available
             if param.annotation.__doc__:
                 param_info["description"] = param.annotation.__doc__.strip()
 
@@ -68,20 +66,12 @@ class SimpleRealtime:
         }
 
     def add_tool(self, func_or_definition: Any, handler: Optional[callable] = None) -> bool:
-        """
-        Add a tool that can be called by the assistant.
-        Can be called with either:
-        1. add_tool(function) - automatically generates schema from function
-        2. add_tool(definition, handler) - manual schema definition and handler
-        """
         if handler is None:
-            # Called with just a function - generate schema automatically
             if not callable(func_or_definition):
                 raise ValueError("When called with one argument, it must be a callable")
             handler = func_or_definition
             definition = self._function_to_schema(func_or_definition)
         else:
-            # Called with definition and handler
             definition = func_or_definition
             if not definition.get('name'):
                 raise ValueError("Missing tool name in definition")
@@ -94,7 +84,6 @@ class SimpleRealtime:
 
         self.tools[name] = {'definition': definition, 'handler': handler}
 
-        # Update session with new tool if connected
         if self.is_connected():
             self.send("session.update", {
                 "session": {
@@ -108,15 +97,12 @@ class SimpleRealtime:
         return True
 
     def add_tools(self, functions: List[callable]) -> bool:
-        """
-        Add multiple functions as tools at once, automatically generating schemas.
-        """
         for func in functions:
             self.add_tool(func)
         return True
 
     def is_connected(self):
-        return self.ws is not None #and self.ws.open
+        return self.ws is not None
 
     def log_event(self, event_type, event):
         if self.debug:
@@ -125,7 +111,6 @@ class SimpleRealtime:
             msg = json.dumps(event)
             self.logs.append((now, event_type, msg))
         return True
-
 
     async def connect(self, model="gpt-4o-realtime-preview-2024-10-01"):
         if self.is_connected():
@@ -137,11 +122,8 @@ class SimpleRealtime:
         }
 
         self.ws = await websockets.connect(f"{self.url}?model={model}", additional_headers=headers)
-
-        # Start the message handler in the same loop as the websocket
         self._message_handler_task = self.event_loop.create_task(self._message_handler())
 
-        # Send initial session configuration with tools
         if self.tools:
             use_tools = [
                 {**tool['definition'], 'type': 'function'}
@@ -167,7 +149,7 @@ class SimpleRealtime:
                 try:
                     message = await asyncio.wait_for(self.ws.recv(), timeout=0.05)
                     data = json.loads(message)
-                    await self.receive(data)  # Changed to await
+                    await self.receive(data)
                 except asyncio.TimeoutError:
                     continue
                 except websockets.exceptions.ConnectionClosed:
@@ -190,7 +172,6 @@ class SimpleRealtime:
         return True
 
     async def handle_function_call(self, event):
-        """Handle function calls from the assistant"""
         try:
             name = event.get('name')
             if name not in self.tools:
@@ -201,11 +182,8 @@ class SimpleRealtime:
             arguments = json.loads(event.get('arguments', '{}'))
             tool = self.tools[name]
 
-            # Execute the function
-            result = await tool['handler'](arguments) if asyncio.iscoroutinefunction(tool['handler']) else tool[
-                'handler'](arguments)
+            result = await tool['handler'](arguments) if asyncio.iscoroutinefunction(tool['handler']) else tool['handler'](arguments)
 
-            # Send function output back
             await self.ws.send(json.dumps({
                 "type": "conversation.item.create",
                 "item": {
@@ -215,7 +193,6 @@ class SimpleRealtime:
                 }
             }))
 
-            # Request a new response
             await self.ws.send(json.dumps({
                 "type": "response.create"
             }))
@@ -223,7 +200,6 @@ class SimpleRealtime:
         except Exception as e:
             print(f"Error handling function call: {e}")
             if call_id:
-                # Send error as function output
                 await self.ws.send(json.dumps({
                     "type": "conversation.item.create",
                     "item": {
@@ -238,21 +214,15 @@ class SimpleRealtime:
             self.transcript += event.get("delta")
 
         if event.get("type") == "response.audio.delta" and self.audio_buffer_cb:
-            b64_audio_chunk = event.get("delta")
-            decoded_audio_chunk = base64.b64decode(b64_audio_chunk)
-            pcm_audio_chunk = np.frombuffer(decoded_audio_chunk, dtype=np.int16)
-            self.audio_buffer_cb(pcm_audio_chunk)
+            self.audio_buffer_cb(event.get("delta"))
 
     async def receive(self, event):
         self.log_event("server", event)
 
         event_type = event.get("type", "")
 
-        # Handle function calls
         if event_type == "response.function_call_arguments.done":
             await self.handle_function_call(event)
-
-        # Handle audio responses
         elif "response.audio" in event_type:
             self.handle_audio(event)
 
@@ -272,9 +242,5 @@ class SimpleRealtime:
         }
 
         self.log_event("client", event)
-
         self.event_loop.create_task(self.ws.send(json.dumps(event)))
-
         return True
-
-

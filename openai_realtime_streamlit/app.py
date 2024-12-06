@@ -5,13 +5,11 @@ import threading
 from asyncio import run_coroutine_threadsafe
 
 import numpy as np
-import sounddevice as sd
 import streamlit as st
 
 from constants import (AUTOSCROLL_SCRIPT, DOCS,
-                       HIDE_STREAMLIT_RUNNING_MAN_SCRIPT, OAI_LOGO_URL)
+                      HIDE_STREAMLIT_RUNNING_MAN_SCRIPT, OAI_LOGO_URL)
 from utils import SimpleRealtime
-from audio import StreamingAudioRecorder
 from audio_browser import BrowserAudioRecorder
 
 # function calling
@@ -19,46 +17,15 @@ from tools import get_current_time
 
 st.set_page_config(layout="wide")
 
-audio_buffer = np.array([], dtype=np.int16)
-
-buffer_lock = threading.Lock()
-
 if "audio_stream_started" not in st.session_state:
     st.session_state.audio_stream_started = False
 
-
-def audio_buffer_cb(pcm_audio_chunk):
+def audio_buffer_cb(audio_data):
     """
-    Callback function so that our realtime client can fill the audio buffer
+    Callback function to handle audio data from the browser
     """
-    global audio_buffer
-
-    with buffer_lock:
-        audio_buffer = np.concatenate([audio_buffer, pcm_audio_chunk])
-
-
-# callback function for real-time playback using sounddevice
-def sd_audio_cb(outdata, frames, time, status):
-    global audio_buffer
-
-    channels = 1
-
-    with buffer_lock:
-        # if there is enough audio in the buffer, send it
-        if len(audio_buffer) >= frames:
-            outdata[:] = audio_buffer[:frames].reshape(-1, channels)
-            # remove the audio that has been played
-            audio_buffer = audio_buffer[frames:]
-        else:
-            # if not enough audio, fill with silence
-            outdata.fill(0)
-
-
-def start_audio_stream():
-    with sd.OutputStream(callback=sd_audio_cb, dtype="int16", samplerate=24_000, channels=1, blocksize=2_000):
-        # keep stream open indefinitely, simulate long duration
-        sd.sleep(int(10e6))
-
+    if st.session_state.client and st.session_state.client.is_connected():
+        st.session_state.client.send("input_audio_buffer.append", {"audio": audio_data})
 
 @st.cache_resource(show_spinner=False)
 def create_loop():
@@ -71,9 +38,7 @@ def create_loop():
     thread.start()
     return loop, thread
 
-
 st.session_state.event_loop, worker_thread = create_loop()
-
 
 def run_async(coroutine):
     """
@@ -81,7 +46,6 @@ def run_async(coroutine):
     just created.
     """
     return run_coroutine_threadsafe(coroutine, st.session_state.event_loop).result()
-
 
 @st.cache_resource(show_spinner=False)
 def setup_client():
@@ -99,14 +63,12 @@ def setup_client():
 
     return client
 
-
 st.session_state.client = setup_client()
 
 if "recorder" not in st.session_state:
     st.session_state.recorder = BrowserAudioRecorder()
 if "recording" not in st.session_state:
     st.session_state.recording = False
-
 
 def toggle_recording():
     st.session_state.recording = not st.session_state.recording
@@ -117,7 +79,6 @@ def toggle_recording():
         st.session_state.recorder.stop_recording()
         st.session_state.client.send("input_audio_buffer.commit")
         st.session_state.client.send("response.create")
-
 
 @st.fragment(run_every=1)
 def logs_text_area():
@@ -134,28 +95,10 @@ def logs_text_area():
                 st.write(f"{time}\t:blue[↑ client] {json.loads(log)['type']}")
     st.components.v1.html(AUTOSCROLL_SCRIPT, height=0)
 
-
 @st.fragment(run_every=1)
 def response_area():
     st.markdown("**conversation**")
     st.write(st.session_state.client.transcript)
-
-
-@st.fragment(run_every=1)
-def audio_player():
-    if not st.session_state.audio_stream_started:
-        st.session_state.audio_stream_started = True
-        start_audio_stream()
-
-
-@st.fragment(run_every=1)
-def audio_recorder():
-    if st.session_state.recording:
-        # drain what's in the queue and send it to openai
-        while not st.session_state.recorder.audio_queue.empty():
-            chunk = st.session_state.recorder.audio_queue.get()
-            st.session_state.client.send("input_audio_buffer.append", {"audio": base64.b64encode(chunk).decode()})
-
 
 def st_app():
     """
@@ -217,11 +160,6 @@ def st_app():
 
     with docs_tab:
         st.markdown(DOCS)
-
-    audio_player()
-
-    audio_recorder()
-
 
 if __name__ == '__main__':
     st_app()
